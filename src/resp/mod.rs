@@ -23,7 +23,7 @@ use enum_dispatch::enum_dispatch;
 use thiserror::Error;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ops::{Deref, DerefMut},
 };
 
@@ -51,7 +51,7 @@ pub enum RespError {
 }
 
 #[enum_dispatch(RespEncoder)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum RespFrame {
     SimpleString(SimpleString),
     Error(SimpleError),
@@ -63,31 +63,33 @@ pub enum RespFrame {
     NullArray(RespNullArray),
     Null(RespNull),
     Boolean(bool),
-    Double(f64),
+    Double(RespDouble),
     Map(RespMap),
     Set(RespSet),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SimpleString(String);
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SimpleError(String);
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct BulkError(Vec<u8>);
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct BulkString(Vec<u8>);
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NullBulkString;
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RespArray(Vec<RespFrame>);
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RespNullArray;
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RespNull;
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RespDouble(String);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RespMap(BTreeMap<String, RespFrame>);
-#[derive(Debug, PartialEq)]
-pub struct RespSet(Vec<RespFrame>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct RespSet(BTreeSet<RespFrame>);
 
 impl Deref for SimpleString {
     type Target = String;
@@ -129,6 +131,14 @@ impl Deref for RespArray {
     }
 }
 
+impl Deref for RespDouble {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Deref for RespMap {
     type Target = BTreeMap<String, RespFrame>;
 
@@ -144,10 +154,16 @@ impl DerefMut for RespMap {
 }
 
 impl Deref for RespSet {
-    type Target = Vec<RespFrame>;
+    type Target = BTreeSet<RespFrame>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for RespSet {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -181,7 +197,24 @@ impl RespArray {
     }
 }
 
+impl RespDouble {
+    pub fn new(s: f64) -> Self {
+        let s = if s.abs() > 1e8 {
+            format!("{:+e}", s)
+        } else {
+            format!("{:+}", s)
+        };
+        Self(s)
+    }
+}
+
 impl Default for RespMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for RespSet {
     fn default() -> Self {
         Self::new()
     }
@@ -194,8 +227,8 @@ impl RespMap {
 }
 
 impl RespSet {
-    pub fn new(s: impl Into<Vec<RespFrame>>) -> Self {
-        Self(s.into())
+    pub fn new() -> Self {
+        Self(BTreeSet::new())
     }
 }
 
@@ -232,5 +265,17 @@ impl<const N: usize> From<&[u8; N]> for BulkString {
 impl<const N: usize> From<&[u8; N]> for RespFrame {
     fn from(s: &[u8; N]) -> Self {
         BulkString::from(s).into()
+    }
+}
+
+impl From<f64> for RespDouble {
+    fn from(s: f64) -> Self {
+        Self::new(s)
+    }
+}
+
+impl From<f64> for RespFrame {
+    fn from(s: f64) -> Self {
+        s.into()
     }
 }

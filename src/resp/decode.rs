@@ -18,8 +18,8 @@ use anyhow::Result;
 use bytes::BytesMut;
 
 use crate::{
-    BulkError, BulkString, NullBulkString, RespArray, RespDecoder, RespError, RespFrame, RespMap,
-    RespNull, RespNullArray, RespSet, SimpleError, SimpleString,
+    BulkError, BulkString, NullBulkString, RespArray, RespDecoder, RespDouble, RespError,
+    RespFrame, RespMap, RespNull, RespNullArray, RespSet, SimpleError, SimpleString,
 };
 
 impl RespDecoder for RespFrame {
@@ -40,7 +40,7 @@ impl RespDecoder for RespFrame {
             },
             b'_' => RespNull::decode(buf).map(RespFrame::Null),
             b'#' => bool::decode(buf).map(RespFrame::Boolean),
-            b',' => f64::decode(buf).map(RespFrame::Double),
+            b',' => RespDouble::decode(buf).map(RespFrame::Double),
             b'*' => match RespNullArray::decode(buf).map(RespFrame::NullArray) {
                 Ok(frame) => Ok(frame),
                 Err(RespError::Incomplete) => Err(RespError::Incomplete),
@@ -87,7 +87,7 @@ impl RespDecoder for RespFrame {
             }
             b'_' => RespNull::expect_length(buf),
             b'#' => bool::expect_length(buf),
-            b',' => f64::expect_length(buf),
+            b',' => RespDouble::expect_length(buf),
             b'%' => RespMap::expect_length(buf),
             b'~' => RespSet::expect_length(buf),
             _ => Err(RespError::InvalidFrameType(format!(
@@ -258,7 +258,7 @@ impl RespDecoder for bool {
 }
 
 // - double: ",[<+|->]<integral>[.<fractional>][<E|e>[sign]<exponent>]\r\n"
-impl RespDecoder for f64 {
+impl RespDecoder for RespDouble {
     const PREFIX: &'static str = ",";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
         validate_frame_data(buf, Self::PREFIX)?;
@@ -266,7 +266,7 @@ impl RespDecoder for f64 {
         let frame = String::from_utf8_lossy(data)
             .parse::<f64>()
             .map_err(|_| RespError::Invalid(format!("Parse failed: {:?}", buf)))?;
-        Ok(frame)
+        Ok(RespDouble::new(frame))
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
@@ -363,15 +363,15 @@ impl RespDecoder for RespSet {
         let nth = String::from_utf8_lossy(&buf[1..nth_len])
             .parse::<usize>()
             .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
-        let mut frames = Vec::with_capacity(nth_len);
+        let mut frames = RespSet::new();
         let mut start = nth_len + 2;
         for _ in 0..nth {
             let frame_len = RespFrame::expect_length(&buf[start..])?;
             let frame = RespFrame::decode(&mut BytesMut::from(&buf[start..start + frame_len]))?;
-            frames.push(frame);
+            frames.insert(frame);
             start += frame_len;
         }
-        Ok(RespSet::new(frames))
+        Ok(frames)
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
@@ -565,15 +565,15 @@ mod tests {
     #[test]
     fn test_f64_decode() -> Result<()> {
         let mut buf = BytesMut::from(",+123.45\r\n");
-        let frame = f64::decode(&mut buf)?;
-        assert_eq!(frame, 123.45);
+        let frame = RespDouble::decode(&mut buf)?;
+        assert_eq!(frame, RespDouble::new(123.45));
 
         let mut buf = BytesMut::from(",+1.23456e8\r\n");
-        let frame = f64::decode(&mut buf)?;
-        assert_eq!(frame, 1.23456e8);
+        let frame = RespDouble::decode(&mut buf)?;
+        assert_eq!(frame, RespDouble::new(1.23456e8));
 
         let mut buf = BytesMut::from(",+123.45x\r\n");
-        let frame = f64::decode(&mut buf);
+        let frame = RespDouble::decode(&mut buf);
         assert_eq!(
             frame,
             Err(RespError::Invalid(
@@ -625,7 +625,10 @@ mod tests {
     fn test_set_decode() -> Result<()> {
         let mut buf = BytesMut::from("~2\r\n$3\r\nget\r\n$5\r\nhello\r\n");
         let frame: RespSet = RespSet::decode(&mut buf)?;
-        assert_eq!(frame, RespSet::new([b"get".into(), b"hello".into()]));
+        let mut set = RespSet::new();
+        set.insert(b"get".into());
+        set.insert(b"hello".into());
+        assert_eq!(frame, set);
 
         Ok(())
     }

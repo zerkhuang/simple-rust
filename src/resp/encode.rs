@@ -16,7 +16,7 @@
 //     - set: "~<number-of-elements>\r\n<element-1>...<element-n>"
 
 use crate::{
-    BulkError, BulkString, NullBulkString, RespArray, RespEncoder, RespMap, RespNull,
+    BulkError, BulkString, NullBulkString, RespArray, RespDouble, RespEncoder, RespMap, RespNull,
     RespNullArray, RespSet, SimpleError, SimpleString,
 };
 
@@ -83,14 +83,9 @@ impl RespEncoder for bool {
 }
 
 // - double: ",[<+|->]<integral>[.<fractional>][<E|e>[sign]<exponent>]\r\n"
-impl RespEncoder for f64 {
+impl RespEncoder for RespDouble {
     fn encode(&self) -> Vec<u8> {
-        if self.abs() > 1e8 {
-            format!(",{:+e}\r\n", self).into_bytes()
-        } else {
-            let sign = if *self < 0.0 { "" } else { "+" };
-            format!(",{}{}\r\n", sign, self).into_bytes()
-        }
+        format!(",{}\r\n", self.0).into_bytes()
     }
 }
 
@@ -196,16 +191,16 @@ mod tests {
 
     #[test]
     fn test_double_encode() {
-        let frame = 123.456;
+        let frame = RespDouble::new(123.456);
         assert_eq!(frame.encode(), b",+123.456\r\n");
 
-        let frame = -123.456;
+        let frame = RespDouble::new(-123.456);
         assert_eq!(frame.encode(), b",-123.456\r\n");
 
-        let frame = 1.23456e8;
+        let frame = RespDouble::new(1.23456e8);
         assert_eq!(frame.encode(), b",+1.23456e8\r\n");
 
-        let frame = -1.23456e8;
+        let frame = RespDouble::new(-1.23456e8);
         assert_eq!(frame.encode(), b",-1.23456e8\r\n");
     }
 
@@ -231,7 +226,7 @@ mod tests {
             "hello".to_string(),
             BulkString::new("world".to_string()).into(),
         );
-        frame.insert("foo".to_string(), (-123456.789).into());
+        frame.insert("foo".to_string(), RespDouble::new(-123456.789).into());
         assert_eq!(
             frame.encode(),
             b"%2\r\n+foo\r\n,-123456.789\r\n+hello\r\n$5\r\nworld\r\n"
@@ -240,13 +235,13 @@ mod tests {
 
     #[test]
     fn test_set_encode() {
-        let frame = RespSet::new([
-            RespArray::new([1234.into(), true.into()]).into(),
-            BulkString::new("world".to_string()).into(),
-        ]);
+        let mut set = RespSet::new();
+        set.insert(RespArray::new(vec![1234.into(), true.into()]).into());
+        set.insert(BulkString::new("world".to_string()).into());
+        set.insert(BulkString::new("world".to_string()).into());
         assert_eq!(
-            frame.encode(),
-            b"~2\r\n*2\r\n:+1234\r\n#t\r\n$5\r\nworld\r\n"
+            &set.encode(),
+            b"~2\r\n$5\r\nworld\r\n*2\r\n:+1234\r\n#t\r\n"
         );
     }
 }

@@ -51,7 +51,7 @@ pub enum RespError {
 }
 
 #[enum_dispatch(RespEncoder)]
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub enum RespFrame {
     SimpleString(SimpleString),
     Error(SimpleError),
@@ -68,28 +68,28 @@ pub enum RespFrame {
     Set(RespSet),
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SimpleString(String);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SimpleError(String);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct BulkError(Vec<u8>);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct BulkString(Vec<u8>);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct SimpleString(pub(crate) String);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct SimpleError(pub(crate) String);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct BulkError(pub(crate) Vec<u8>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct BulkString(pub(crate) Vec<u8>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct NullBulkString;
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RespArray(Vec<RespFrame>);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct RespArray(pub(crate) Vec<RespFrame>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct RespNullArray;
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct RespNull;
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RespDouble(String);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RespMap(BTreeMap<String, RespFrame>);
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RespSet(BTreeSet<RespFrame>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct RespDouble(pub(crate) String);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct RespMap(pub(crate) BTreeMap<String, RespFrame>);
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+pub struct RespSet(pub(crate) BTreeSet<RespFrame>);
 
 impl Deref for SimpleString {
     type Target = String;
@@ -277,5 +277,17 @@ impl From<f64> for RespDouble {
 impl From<f64> for RespFrame {
     fn from(s: f64) -> Self {
         s.into()
+    }
+}
+
+impl AsRef<str> for SimpleString {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for BulkString {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }

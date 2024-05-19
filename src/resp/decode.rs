@@ -25,12 +25,14 @@ use crate::{
 impl RespDecoder for RespFrame {
     const PREFIX: &'static str = "";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        match buf[0] {
-            b'+' => SimpleString::decode(buf).map(RespFrame::SimpleString),
-            b'-' => SimpleError::decode(buf).map(RespFrame::Error),
-            b'!' => BulkError::decode(buf).map(RespFrame::BulkError),
-            b':' => i64::decode(buf).map(RespFrame::Integer),
-            b'$' => match NullBulkString::decode(buf) {
+        // 使用迭代器方式可以避免buf长度为0时的panic
+        let mut iter = buf.iter().peekable();
+        match iter.peek() {
+            Some(b'+') => SimpleString::decode(buf).map(RespFrame::SimpleString),
+            Some(b'-') => SimpleError::decode(buf).map(RespFrame::Error),
+            Some(b'!') => BulkError::decode(buf).map(RespFrame::BulkError),
+            Some(b':') => i64::decode(buf).map(RespFrame::Integer),
+            Some(b'$') => match NullBulkString::decode(buf) {
                 Ok(frame) => Ok(RespFrame::NullBulkString(frame)),
                 Err(RespError::Incomplete) => Err(RespError::Incomplete),
                 _ => {
@@ -38,10 +40,10 @@ impl RespDecoder for RespFrame {
                     Ok(RespFrame::BulkString(frame))
                 }
             },
-            b'_' => RespNull::decode(buf).map(RespFrame::Null),
-            b'#' => bool::decode(buf).map(RespFrame::Boolean),
-            b',' => RespDouble::decode(buf).map(RespFrame::Double),
-            b'*' => match RespNullArray::decode(buf).map(RespFrame::NullArray) {
+            Some(b'_') => RespNull::decode(buf).map(RespFrame::Null),
+            Some(b'#') => bool::decode(buf).map(RespFrame::Boolean),
+            Some(b',') => RespDouble::decode(buf).map(RespFrame::Double),
+            Some(b'*') => match RespNullArray::decode(buf).map(RespFrame::NullArray) {
                 Ok(frame) => Ok(frame),
                 Err(RespError::Incomplete) => Err(RespError::Incomplete),
                 _ => {
@@ -49,14 +51,15 @@ impl RespDecoder for RespFrame {
                     Ok(RespFrame::Array(frame))
                 }
             },
-            b'%' => {
+            Some(b'%') => {
                 let frame = RespMap::decode(buf)?;
                 Ok(RespFrame::Map(frame))
             }
-            b'~' => {
+            Some(b'~') => {
                 let frame = RespSet::decode(buf)?;
                 Ok(RespFrame::Set(frame))
             }
+            None => Err(RespError::Incomplete),
             _ => Err(RespError::InvalidFrameType(format!(
                 "Invalid frame: {:?}",
                 buf
@@ -290,7 +293,6 @@ impl RespDecoder for RespArray {
         let mut start = nth_len + 2;
         for _ in 0..nth {
             let frame_len = RespFrame::expect_length(&buf[start..])?;
-            println!("frame_len: {}, start: {}, buf: {:?}", frame_len, start, buf);
             let frame = RespFrame::decode(&mut BytesMut::from(&buf[start..start + frame_len]))?;
             frames.push(frame);
             start += frame_len;

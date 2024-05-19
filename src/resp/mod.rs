@@ -27,6 +27,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+const CRLF_LEN: usize = 2;
+
 #[enum_dispatch]
 pub trait RespEncoder {
     fn encode(&self) -> Vec<u8>;
@@ -34,8 +36,12 @@ pub trait RespEncoder {
 
 pub trait RespDecoder: Sized {
     const PREFIX: &'static str;
+    const N_CRLF: usize = 1;
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError>;
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError>;
+    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
+        let end = find_crlf(buf, Self::N_CRLF).ok_or(RespError::Incomplete)?;
+        Ok(end + CRLF_LEN)
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -66,6 +72,19 @@ pub enum RespFrame {
     Double(RespDouble),
     Map(RespMap),
     Set(RespSet),
+}
+
+fn find_crlf(buf: &[u8], nth: usize) -> Option<usize> {
+    let mut count = 0;
+    for i in 0..buf.len() - 1 {
+        if buf[i] == b'\r' && buf[i + 1] == b'\n' {
+            count += 1;
+            if count == nth {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]

@@ -15,12 +15,14 @@
 //     - set: "~<number-of-elements>\r\n<element-1>...<element-n>"
 
 use anyhow::Result;
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 
 use crate::{
     BulkError, BulkString, NullBulkString, RespArray, RespDecoder, RespDouble, RespError,
     RespFrame, RespMap, RespNull, RespNullArray, RespSet, SimpleError, SimpleString,
 };
+
+use super::{find_crlf, CRLF_LEN};
 
 impl RespDecoder for RespFrame {
     const PREFIX: &'static str = "";
@@ -105,15 +107,9 @@ impl RespDecoder for RespFrame {
 impl RespDecoder for SimpleString {
     const PREFIX: &'static str = "+";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        let frame = SimpleString::new(String::from_utf8_lossy(data).to_string());
+        let data = extract_data(buf, Self::PREFIX)?;
+        let frame = SimpleString::new(data);
         Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
@@ -121,33 +117,23 @@ impl RespDecoder for SimpleString {
 impl RespDecoder for SimpleError {
     const PREFIX: &'static str = "-";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        let frame = SimpleError::new(String::from_utf8_lossy(data).to_string());
+        let data = extract_data(buf, Self::PREFIX)?;
+        let frame = SimpleError::new(data);
         Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
 // - bulk error: "!<length>\r\n<error>\r\n"
 impl RespDecoder for BulkError {
     const PREFIX: &'static str = "!";
+    const N_CRLF: usize = 2;
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let frame_len = Self::expect_length(buf)?;
-        let (len_end, len) = parse_length(&buf[..frame_len])?;
-        let data = &buf[len_end + 2..len_end + 2 + len];
-        let frame = BulkError::new(data.to_vec());
-        Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 2).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
+        let len = extract_length(buf, Self::PREFIX)?;
+        let data = extract_data(buf, "")?;
+        if data.len() != len {
+            return Err(RespError::InvalidFrameLength);
+        }
+        Ok(BulkError::new(data))
     }
 }
 
@@ -155,35 +141,25 @@ impl RespDecoder for BulkError {
 impl RespDecoder for i64 {
     const PREFIX: &'static str = ":";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        let frame = String::from_utf8_lossy(data)
+        let data = extract_data(buf, Self::PREFIX)?;
+        let frame = data
             .parse::<i64>()
-            .map_err(|_| RespError::Invalid(format!("Parse failed: {:?}", buf)))?;
+            .map_err(|_| RespError::Invalid(format!("Parse failed: {:?}", data)))?;
         Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
 // - bulk string: "$<length>\r\n<data>\r\n"
 impl RespDecoder for BulkString {
     const PREFIX: &'static str = "$";
+    const N_CRLF: usize = 2;
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let frame_len = Self::expect_length(buf)?;
-        let (len_end, len) = parse_length(&buf[..frame_len])?;
-        let data = &buf[len_end + 2..len_end + 2 + len];
-        let frame = BulkString::new(data.to_vec());
-        Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 2).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
+        let len = extract_length(buf, Self::PREFIX)?;
+        let data = extract_data(buf, "")?;
+        if data.len() != len {
+            return Err(RespError::InvalidFrameLength);
+        }
+        Ok(BulkString::new(data))
     }
 }
 
@@ -191,17 +167,8 @@ impl RespDecoder for BulkString {
 impl RespDecoder for NullBulkString {
     const PREFIX: &'static str = "$";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        if data != b"-1" {
-            return Err(RespError::Invalid(String::from_utf8_lossy(buf).to_string()));
-        }
-        Ok(NullBulkString)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
+        extract_fixed_data(buf, Self::PREFIX, "-1", "NullBulkString")?;
+        Ok(Self)
     }
 }
 
@@ -209,17 +176,8 @@ impl RespDecoder for NullBulkString {
 impl RespDecoder for RespNullArray {
     const PREFIX: &'static str = "*";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        if data != b"-1" {
-            return Err(RespError::Invalid(String::from_utf8_lossy(buf).to_string()));
-        }
+        extract_fixed_data(buf, Self::PREFIX, "-1", "NullArray")?;
         Ok(Self)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
@@ -227,16 +185,8 @@ impl RespDecoder for RespNullArray {
 impl RespDecoder for RespNull {
     const PREFIX: &'static str = "_";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        if buf.len() != 3 {
-            return Err(RespError::Invalid(String::from_utf8_lossy(buf).to_string()));
-        }
+        extract_fixed_data(buf, Self::PREFIX, "", "NullArray")?;
         Ok(Self)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
@@ -244,19 +194,13 @@ impl RespDecoder for RespNull {
 impl RespDecoder for bool {
     const PREFIX: &'static str = "#";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        let frame = match data {
-            b"t" => true,
-            b"f" => false,
-            _ => return Err(RespError::Invalid(String::from_utf8_lossy(buf).to_string())),
+        let data = extract_data(buf, Self::PREFIX)?;
+        let frame = match data.as_str() {
+            "t" => true,
+            "f" => false,
+            _ => return Err(RespError::Invalid(format!("Invalid bool: {:?}", data))),
         };
         Ok(frame)
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
@@ -264,17 +208,11 @@ impl RespDecoder for bool {
 impl RespDecoder for RespDouble {
     const PREFIX: &'static str = ",";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let data = &buf[1..&buf.len() - 2];
-        let frame = String::from_utf8_lossy(data)
+        let data = extract_data(buf, Self::PREFIX)?;
+        let frame = data
             .parse::<f64>()
-            .map_err(|_| RespError::Invalid(format!("Parse failed: {:?}", buf)))?;
+            .map_err(|_| RespError::Invalid(format!("Parse failed: {:?}", data)))?;
         Ok(RespDouble::new(frame))
-    }
-
-    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        Ok(end + 2)
     }
 }
 
@@ -283,30 +221,22 @@ impl RespDecoder for RespDouble {
 impl RespDecoder for RespArray {
     const PREFIX: &'static str = "*";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
-        let mut frames = Vec::with_capacity(nth_len);
-        let mut start = nth_len + 2;
+        let total = Self::expect_length(buf)?;
+        if buf.len() < total {
+            return Err(RespError::Incomplete);
+        }
+        let nth = extract_length(buf, Self::PREFIX)?;
+        let mut frames = Vec::with_capacity(nth);
         for _ in 0..nth {
-            let frame_len = RespFrame::expect_length(&buf[start..])?;
-            let frame = RespFrame::decode(&mut BytesMut::from(&buf[start..start + frame_len]))?;
+            let frame = RespFrame::decode(buf)?;
             frames.push(frame);
-            start += frame_len;
         }
         Ok(RespArray::new(frames))
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
-
-        let mut total = nth_len + 2;
+        let (nth, position) = extract_nth_and_position(buf)?;
+        let mut total = position + CRLF_LEN;
         for _ in 0..nth {
             let frame_len = RespFrame::expect_length(&buf[total..])?;
             total += frame_len;
@@ -319,34 +249,24 @@ impl RespDecoder for RespArray {
 impl RespDecoder for RespMap {
     const PREFIX: &'static str = "%";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
+        let total = Self::expect_length(buf)?;
+        if buf.len() < total {
+            return Err(RespError::Incomplete);
+        }
 
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
+        let nth = extract_length(buf, Self::PREFIX)?;
         let mut map = Self::new();
-        let mut start = nth_len + 2;
         for _ in 0..nth {
-            let key_len = SimpleString::expect_length(&buf[start..])?;
-            let key = SimpleString::decode(&mut BytesMut::from(&buf[start..start + key_len]))?;
-            let value_len = RespFrame::expect_length(&buf[start + key_len..])?;
-            let value = RespFrame::decode(&mut BytesMut::from(
-                &buf[start + key_len..start + key_len + value_len],
-            ))?;
+            let key = SimpleString::decode(buf)?;
+            let value = RespFrame::decode(buf)?;
             map.0.insert(key.0, value);
-            start += key_len + value_len;
         }
         Ok(map)
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
-
-        let mut total = nth_len + 2;
+        let (nth, position) = extract_nth_and_position(buf)?;
+        let mut total = position + CRLF_LEN;
         for _ in 0..nth {
             let key_len = RespFrame::expect_length(&buf[total..])?;
             let value_len = RespFrame::expect_length(&buf[total + key_len..])?;
@@ -360,29 +280,18 @@ impl RespDecoder for RespMap {
 impl RespDecoder for RespSet {
     const PREFIX: &'static str = "~";
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        validate_frame_data(buf, Self::PREFIX)?;
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
+        let nth = extract_length(buf, Self::PREFIX)?;
         let mut frames = RespSet::new();
-        let mut start = nth_len + 2;
         for _ in 0..nth {
-            let frame_len = RespFrame::expect_length(&buf[start..])?;
-            let frame = RespFrame::decode(&mut BytesMut::from(&buf[start..start + frame_len]))?;
+            let frame = RespFrame::decode(buf)?;
             frames.insert(frame);
-            start += frame_len;
         }
         Ok(frames)
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let nth_len = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-        let nth = String::from_utf8_lossy(&buf[1..nth_len])
-            .parse::<usize>()
-            .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
-
-        let mut total = nth_len + 2;
+        let (nth, position) = extract_nth_and_position(buf)?;
+        let mut total = position + CRLF_LEN;
         for _ in 0..nth {
             let frame_len = RespFrame::expect_length(&buf[total..])?;
             total += frame_len;
@@ -392,46 +301,60 @@ impl RespDecoder for RespSet {
 }
 
 fn validate_frame_data(buf: &mut BytesMut, prefix: &str) -> Result<(), RespError> {
-    if buf.len() < 3 {
+    if buf.len() < CRLF_LEN + prefix.len() {
         return Err(RespError::Incomplete);
     }
-    if &buf[..1] != prefix.as_bytes() {
+    if !buf.starts_with(prefix.as_bytes()) {
         return Err(RespError::InvalidFrameType(format!(
             "Invalid frame: {:?}",
             buf
         )));
     }
-
-    if (buf[buf.len() - 2], buf[buf.len() - 1]) != (b'\r', b'\n') {
-        return Err(RespError::Incomplete);
-    }
-
     Ok(())
 }
 
-fn find_crlf(buf: &[u8], nth: usize) -> Option<usize> {
-    let mut count = 0;
-    for i in 0..buf.len() - 1 {
-        if buf[i] == b'\r' && buf[i + 1] == b'\n' {
-            count += 1;
-            if count == nth {
-                return Some(i);
-            }
-        }
-    }
-    None
+fn extract_nth_and_position(buf: &[u8]) -> Result<(usize, usize), RespError> {
+    let position = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
+    let nth = String::from_utf8_lossy(&buf[1..position])
+        .parse::<usize>()
+        .map_err(|_| RespError::Invalid(String::from_utf8_lossy(buf).to_string()))?;
+    Ok((nth, position))
 }
 
-fn parse_length(buf: &[u8]) -> Result<(usize, usize), RespError> {
-    let len_end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
-    let len = String::from_utf8_lossy(&buf[1..len_end])
+fn extract_data(buf: &mut BytesMut, prefix: &str) -> Result<String, RespError> {
+    validate_frame_data(buf, prefix)?;
+    let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
+    let data = buf.split_to(end + CRLF_LEN);
+    let s = String::from_utf8_lossy(&data[prefix.len()..end]).to_string();
+    Ok(s)
+}
+
+fn extract_length(buf: &mut BytesMut, prefix: &str) -> Result<usize, RespError> {
+    let data = extract_data(buf, prefix)?;
+    let len = data
         .parse::<usize>()
         .map_err(|_| RespError::InvalidFrameLength)?;
+    Ok(len)
+}
 
-    if (len_end + 2 + len + 2) != buf.len() {
-        return Err(RespError::InvalidFrameLength);
+fn extract_fixed_data(
+    buf: &mut BytesMut,
+    prefix: &str,
+    except_data: &str,
+    frame_type: &str,
+) -> Result<(), RespError> {
+    validate_frame_data(buf, prefix)?;
+    let end = find_crlf(buf, 1).ok_or(RespError::Incomplete)?;
+    if &buf[prefix.len()..end] != except_data.as_bytes() {
+        return Err(RespError::Invalid(format!(
+            "{} expected: {}, got: {}",
+            frame_type,
+            except_data,
+            String::from_utf8_lossy(&buf[prefix.len()..end])
+        )));
     }
-    Ok((len_end, len))
+    buf.advance(end + CRLF_LEN);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -491,9 +414,7 @@ mod tests {
         let frame = i64::decode(&mut buf);
         assert_eq!(
             frame,
-            Err(RespError::Invalid(
-                "Parse failed: b\":xxx\\r\\n\"".to_string()
-            ))
+            Err(RespError::Invalid("Parse failed: \"xxx\"".to_string()))
         );
 
         Ok(())
@@ -520,7 +441,12 @@ mod tests {
 
         let mut buf = BytesMut::from("$-2\r\n");
         let frame = NullBulkString::decode(&mut buf);
-        assert_eq!(frame, Err(RespError::Invalid("$-2\r\n".to_string())));
+        assert_eq!(
+            frame,
+            Err(RespError::Invalid(
+                "NullBulkString expected: -1, got: -2".to_string()
+            ))
+        );
         Ok(())
     }
 
@@ -532,7 +458,12 @@ mod tests {
 
         let mut buf = BytesMut::from("*-2\r\n");
         let frame = RespNullArray::decode(&mut buf);
-        assert_eq!(frame, Err(RespError::Invalid("*-2\r\n".to_string())));
+        assert_eq!(
+            frame,
+            Err(RespError::Invalid(
+                "NullArray expected: -1, got: -2".to_string()
+            ))
+        );
         Ok(())
     }
 
@@ -544,7 +475,12 @@ mod tests {
 
         let mut buf = BytesMut::from("_x\r\n");
         let frame = RespNull::decode(&mut buf);
-        assert_eq!(frame, Err(RespError::Invalid("_x\r\n".to_string())));
+        assert_eq!(
+            frame,
+            Err(RespError::Invalid(
+                "NullArray expected: , got: x".to_string()
+            ))
+        );
         Ok(())
     }
 
@@ -560,7 +496,10 @@ mod tests {
 
         let mut buf = BytesMut::from("#x\r\n");
         let frame = bool::decode(&mut buf);
-        assert_eq!(frame, Err(RespError::Invalid("#x\r\n".to_string())));
+        assert_eq!(
+            frame,
+            Err(RespError::Invalid("Invalid bool: \"x\"".to_string()))
+        );
         Ok(())
     }
 
@@ -578,9 +517,7 @@ mod tests {
         let frame = RespDouble::decode(&mut buf);
         assert_eq!(
             frame,
-            Err(RespError::Invalid(
-                "Parse failed: b\",+123.45x\\r\\n\"".to_string()
-            ))
+            Err(RespError::Invalid("Parse failed: \"+123.45x\"".to_string()))
         );
         Ok(())
     }

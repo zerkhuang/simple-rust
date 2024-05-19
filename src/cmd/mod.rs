@@ -102,6 +102,19 @@ impl TryFrom<RespArray> for Command {
     }
 }
 
+impl TryFrom<RespFrame> for Command {
+    type Error = CommandError;
+
+    fn try_from(frame: RespFrame) -> Result<Self, Self::Error> {
+        match frame {
+            RespFrame::Array(array) => Command::try_from(array),
+            _ => Err(CommandError::InvalidCommand(
+                "Command must be an Array frame".to_string(),
+            )),
+        }
+    }
+}
+
 fn validate_command(
     frames: &RespArray,
     keys: &[&'static str],

@@ -1,4 +1,4 @@
-use crate::{Backend, RespArray, RespFrame, RespMap, RespNull};
+use crate::{Backend, BulkString, RespArray, RespFrame, RespNull};
 
 use super::{
     extract_args, validate_command, CommandError, CommandExecutor, HGet, HGetAll, HSet, RESP_OK,
@@ -24,13 +24,22 @@ impl CommandExecutor for HGetAll {
     fn execute(&self, backend: &Backend) -> RespFrame {
         match backend.hgetall(&self.key) {
             Some(value) => {
-                let mut map = RespMap::default();
+                let mut data = Vec::with_capacity(value.len());
+
                 for v in value.iter() {
-                    let key = v.key().to_owned();
-                    let value = v.value().clone();
-                    map.insert(key, value);
+                    data.push((v.key().to_owned(), v.value().clone()));
                 }
-                map.into()
+
+                if self.sort {
+                    data.sort_by(|a, b| a.0.cmp(&b.0));
+                }
+
+                let frames = data
+                    .into_iter()
+                    .flat_map(|(k, v)| vec![BulkString::new(k).into(), v])
+                    .collect::<Vec<RespFrame>>();
+
+                RespArray::new(frames).into()
             }
             None => RespFrame::Null(RespNull),
         }
@@ -46,13 +55,13 @@ impl TryFrom<RespArray> for HGet {
 
         let mut args = extract_args(arr, 1)?.into_iter();
 
-        let field = match args.next() {
-            Some(RespFrame::BulkString(field)) => String::from_utf8(field.0)?,
+        let key = match args.next() {
+            Some(RespFrame::BulkString(key)) => String::from_utf8(key.0)?,
             _ => return Err(CommandError::InvalidArguments("Invalid Key".to_string())),
         };
 
-        let key = match args.next() {
-            Some(RespFrame::BulkString(key)) => String::from_utf8(key.0)?,
+        let field = match args.next() {
+            Some(RespFrame::BulkString(field)) => String::from_utf8(field.0)?,
             _ => return Err(CommandError::InvalidArguments("Invalid Field".to_string())),
         };
 
@@ -102,7 +111,7 @@ impl TryFrom<RespArray> for HGetAll {
             _ => return Err(CommandError::InvalidArguments("Invalid Key".to_string())),
         };
 
-        Ok(Self { key })
+        Ok(Self { key, sort: false })
     }
 }
 
@@ -121,8 +130,8 @@ mod tests {
         let frame = RespArray::decode(&mut buf)?;
 
         let hget: HGet = frame.try_into()?;
-        assert_eq!(hget.key, "hello");
-        assert_eq!(hget.field, "map");
+        assert_eq!(hget.key, "map");
+        assert_eq!(hget.field, "hello");
 
         Ok(())
     }
@@ -181,14 +190,15 @@ mod tests {
 
         let cmd = HGetAll {
             key: "map".to_string(),
+            sort: true,
         };
         let result = cmd.execute(&backend);
-        let mut expected = RespMap::new();
-        expected.insert("hello".to_string(), RespFrame::BulkString(b"world".into()));
-        expected.insert(
-            "hello1".to_string(),
-            RespFrame::BulkString(b"world1".into()),
-        );
+        let expected = RespArray::new(vec![
+            b"hello".into(),
+            b"world".into(),
+            b"hello1".into(),
+            b"world1".into(),
+        ]);
         assert_eq!(result, expected.into());
         Ok(())
     }

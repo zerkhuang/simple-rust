@@ -76,6 +76,7 @@ pub struct HSet {
 #[derive(Debug)]
 pub struct HGetAll {
     key: String,
+    sort: bool,
 }
 
 impl TryFrom<RespArray> for Command {

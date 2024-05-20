@@ -10,7 +10,7 @@ use crate::{Backend, RespArray, RespError, RespFrame, SimpleString};
 
 pub use self::{
     echo::Echo,
-    hmap::{HGet, HGetAll, HSet},
+    hmap::{HGet, HGetAll, HMGet, HSet},
     map::{Get, Set},
 };
 
@@ -32,6 +32,7 @@ pub enum Command {
     HGet(HGet),
     HSet(HSet),
     HGetAll(HGetAll),
+    HMGet(HMGet),
     Echo(Echo),
 }
 
@@ -60,6 +61,7 @@ impl TryFrom<RespArray> for Command {
                 b"hget" => Ok(HGet::try_from(array)?.into()),
                 b"hset" => Ok(HSet::try_from(array)?.into()),
                 b"hgetall" => Ok(HGetAll::try_from(array)?.into()),
+                b"hmget" => Ok(HMGet::try_from(array)?.into()),
                 b"echo" => Ok(Echo::try_from(array)?.into()),
                 _ => Err(CommandError::InvalidCommand(format!(
                     "Invalid command: {}",

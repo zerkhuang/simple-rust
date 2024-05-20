@@ -27,6 +27,12 @@ pub struct HGetAll {
     sort: bool,
 }
 
+#[derive(Debug)]
+pub struct HMGet {
+    key: String,
+    fields: Vec<String>,
+}
+
 impl CommandExecutor for HGet {
     fn execute(&self, backend: &Backend) -> RespFrame {
         match backend.hget(&self.key, &self.field) {
@@ -66,6 +72,20 @@ impl CommandExecutor for HGetAll {
             }
             None => RespFrame::Null(RespNull),
         }
+    }
+}
+
+impl CommandExecutor for HMGet {
+    fn execute(&self, backend: &Backend) -> RespFrame {
+        let mut data = Vec::with_capacity(self.fields.len());
+
+        for field in self.fields.iter() {
+            match backend.hget(&self.key, field) {
+                Some(value) => data.push(value),
+                None => data.push(RespFrame::Null(RespNull)),
+            }
+        }
+        RespArray::new(data).into()
     }
 }
 
@@ -135,6 +155,34 @@ impl TryFrom<RespArray> for HGetAll {
         };
 
         Ok(Self { key, sort: false })
+    }
+}
+
+impl TryFrom<RespArray> for HMGet {
+    type Error = CommandError;
+
+    fn try_from(arr: RespArray) -> Result<Self, Self::Error> {
+        let arr_len = arr.len();
+        validate_command(&arr, &["hmget"], arr_len - 1)?;
+
+        let mut args = extract_args(arr, 1)?.into_iter();
+
+        let key = match args.next() {
+            Some(RespFrame::BulkString(key)) => String::from_utf8(key.0)?,
+            _ => return Err(CommandError::InvalidArguments("Invalid Key".to_string())),
+        };
+
+        let mut fields = Vec::with_capacity(arr_len - 1);
+        loop {
+            let arg = args.next();
+            match arg {
+                Some(RespFrame::BulkString(field)) => fields.push(String::from_utf8(field.0)?),
+                None => break,
+                _ => return Err(CommandError::InvalidArguments("Invalid Field".to_string())),
+            }
+        }
+
+        Ok(Self { key, fields })
     }
 }
 
@@ -223,6 +271,58 @@ mod tests {
             b"world1".into(),
         ]);
         assert_eq!(result, expected.into());
+        Ok(())
+    }
+
+    #[test]
+    fn test_hmget_try_from() -> Result<()> {
+        let mut buf =
+            BytesMut::from("*4\r\n$5\r\nhmget\r\n$3\r\nmap\r\n$5\r\nhello\r\n$5\r\nworld\r\n");
+
+        let frame = RespArray::decode(&mut buf)?;
+
+        let hmget: HMGet = frame.try_into()?;
+        assert_eq!(hmget.key, "map");
+        assert_eq!(hmget.fields, vec!["hello", "world"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hmget_command() -> Result<()> {
+        let backend = crate::Backend::new();
+        let cmd = HSet {
+            key: "map".to_string(),
+            field: "field".to_string(),
+            value: RespFrame::BulkString(b"hello".into()),
+        };
+        cmd.execute(&backend);
+
+        let cmd = HSet {
+            key: "map".to_string(),
+            field: "field2".to_string(),
+            value: RespFrame::BulkString(b"world".into()),
+        };
+        cmd.execute(&backend);
+
+        let cmd = HMGet {
+            key: "map".to_string(),
+            fields: vec![
+                "field".to_string(),
+                "field2".to_string(),
+                "field3".to_string(),
+            ],
+        };
+
+        let result = cmd.execute(&backend);
+        let expected = RespArray::new(vec![
+            RespFrame::BulkString(b"hello".into()),
+            RespFrame::BulkString(b"world".into()),
+            RespFrame::Null(RespNull),
+        ]);
+
+        assert_eq!(result, expected.into());
+
         Ok(())
     }
 }

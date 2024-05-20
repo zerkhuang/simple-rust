@@ -1,11 +1,3 @@
-//     - SET key val ("*3\r\n$3\r\nset\r\n$5\r\nhello\r\n$5\r\nworld\r\n")
-//     - GET key ("*2\r\n$3\r\nget\r\n$5\r\nhello\r\n")
-//     - HSET key field val
-//         - ("*4\r\n$4\r\nhset\r\n$3\r\nmap\r\n$5\r\nhello\r\n$5\r\nworld\r\n")
-//     - HGET key field
-//         - ("*3\r\n$4\r\nhget\r\n$3\r\nmap\r\n$5\r\nhello\r\n")
-//     - HGETALL key
-//         - ("*2\r\n$7\r\nhgetall\r\n$3\r\nmap\r\n")
 mod hmap;
 mod map;
 
@@ -14,6 +6,11 @@ use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::{Backend, RespArray, RespError, RespFrame, SimpleString};
+
+pub use self::{
+    hmap::{HGet, HGetAll, HSet},
+    map::{Get, Set},
+};
 
 // lazy_static 懒加载
 lazy_static! {
@@ -47,36 +44,6 @@ pub enum CommandError {
 
     #[error("{0}")]
     Utf8Error(#[from] std::string::FromUtf8Error),
-}
-
-#[derive(Debug)]
-pub struct Get {
-    key: String,
-}
-
-#[derive(Debug)]
-pub struct Set {
-    key: String,
-    value: RespFrame,
-}
-
-#[derive(Debug)]
-pub struct HGet {
-    key: String,
-    field: String,
-}
-
-#[derive(Debug)]
-pub struct HSet {
-    key: String,
-    field: String,
-    value: RespFrame,
-}
-
-#[derive(Debug)]
-pub struct HGetAll {
-    key: String,
-    sort: bool,
 }
 
 impl TryFrom<RespArray> for Command {

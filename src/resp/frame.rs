@@ -2,8 +2,8 @@ use bytes::BytesMut;
 use enum_dispatch::enum_dispatch;
 
 use crate::{
-    BulkError, BulkString, NullBulkString, RespArray, RespDecoder, RespDouble, RespError, RespMap,
-    RespNull, RespNullArray, RespSet, SimpleError, SimpleString,
+    BulkError, BulkString, RespArray, RespDecoder, RespDouble, RespError, RespMap, RespNull,
+    RespSet, SimpleError, SimpleString,
 };
 
 #[enum_dispatch(RespEncoder)]
@@ -14,9 +14,7 @@ pub enum RespFrame {
     BulkError(BulkError),
     Integer(i64),
     BulkString(BulkString),
-    NullBulkString(NullBulkString),
     Array(RespArray),
-    NullArray(RespNullArray),
     Null(RespNull),
     Boolean(bool),
     Double(RespDouble),
@@ -34,25 +32,11 @@ impl RespDecoder for RespFrame {
             Some(b'-') => SimpleError::decode(buf).map(RespFrame::Error),
             Some(b'!') => BulkError::decode(buf).map(RespFrame::BulkError),
             Some(b':') => i64::decode(buf).map(RespFrame::Integer),
-            Some(b'$') => match NullBulkString::decode(buf) {
-                Ok(frame) => Ok(RespFrame::NullBulkString(frame)),
-                Err(RespError::Incomplete) => Err(RespError::Incomplete),
-                _ => {
-                    let frame = BulkString::decode(buf)?;
-                    Ok(RespFrame::BulkString(frame))
-                }
-            },
+            Some(b'$') => BulkString::decode(buf).map(RespFrame::BulkString),
             Some(b'_') => RespNull::decode(buf).map(RespFrame::Null),
             Some(b'#') => bool::decode(buf).map(RespFrame::Boolean),
             Some(b',') => RespDouble::decode(buf).map(RespFrame::Double),
-            Some(b'*') => match RespNullArray::decode(buf).map(RespFrame::NullArray) {
-                Ok(frame) => Ok(frame),
-                Err(RespError::Incomplete) => Err(RespError::Incomplete),
-                _ => {
-                    let frame = RespArray::decode(buf)?;
-                    Ok(RespFrame::Array(frame))
-                }
-            },
+            Some(b'*') => RespArray::decode(buf).map(RespFrame::Array),
             Some(b'%') => {
                 let frame = RespMap::decode(buf)?;
                 Ok(RespFrame::Map(frame))
@@ -78,18 +62,8 @@ impl RespDecoder for RespFrame {
             b'-' => SimpleError::expect_length(buf),
             b'!' => BulkError::expect_length(buf),
             b':' => i64::expect_length(buf),
-            b'$' => {
-                if &buf[1..3] == b"-1" {
-                    return NullBulkString::expect_length(buf);
-                }
-                BulkString::expect_length(buf)
-            }
-            b'*' => {
-                if &buf[1..3] == b"-1" {
-                    return RespNullArray::expect_length(buf);
-                }
-                RespArray::expect_length(buf)
-            }
+            b'$' => BulkString::expect_length(buf),
+            b'*' => RespArray::expect_length(buf),
             b'_' => RespNull::expect_length(buf),
             b'#' => bool::expect_length(buf),
             b',' => RespDouble::expect_length(buf),

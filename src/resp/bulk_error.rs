@@ -4,7 +4,7 @@ use bytes::BytesMut;
 
 use crate::{RespDecoder, RespEncoder, RespError};
 
-use super::extract_sized_data;
+use super::{extract_data, extract_len_and_end, CRLF_LEN};
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct BulkError(pub(crate) Vec<u8>);
@@ -25,7 +25,12 @@ impl RespDecoder for BulkError {
     const PREFIX: &'static str = "!";
     const N_CRLF: usize = 2;
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        let data = extract_sized_data(buf, Self::PREFIX)?;
+        let (len, end) = extract_len_and_end(buf)?;
+        let prefix = String::from_utf8_lossy(&buf[0..end + CRLF_LEN]).to_string();
+        let data = extract_data(buf, &prefix)?;
+        if data.len() != len {
+            return Err(RespError::InvalidFrameLength);
+        }
         Ok(BulkError::new(data))
     }
 }

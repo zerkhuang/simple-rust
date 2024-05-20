@@ -7,7 +7,7 @@ use bytes::BytesMut;
 
 use crate::{RespDecoder, RespEncoder, RespError, RespFrame};
 
-use super::{extract_length, extract_nth_and_position, CRLF_LEN};
+use super::{extract_len_and_end, extract_nth, CRLF_LEN};
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct RespSet(pub(crate) BTreeSet<RespFrame>);
@@ -30,7 +30,7 @@ impl RespDecoder for RespSet {
         if buf.len() < total {
             return Err(RespError::Incomplete);
         }
-        let nth = extract_length(buf, Self::PREFIX)?;
+        let nth = extract_nth(buf, Self::PREFIX)?;
         let mut frames = RespSet::new();
         for _ in 0..nth {
             let frame = RespFrame::decode(buf)?;
@@ -40,9 +40,9 @@ impl RespDecoder for RespSet {
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let (nth, position) = extract_nth_and_position(buf)?;
-        let mut total = position + CRLF_LEN;
-        for _ in 0..nth {
+        let (len, end) = extract_len_and_end(buf)?;
+        let mut total = end + CRLF_LEN;
+        for _ in 0..len {
             let frame_len = RespFrame::expect_length(&buf[total..])?;
             total += frame_len;
         }

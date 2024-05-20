@@ -7,7 +7,7 @@ use bytes::BytesMut;
 
 use crate::{RespDecoder, RespEncoder, RespError, RespFrame, SimpleString};
 
-use super::{extract_length, extract_nth_and_position, CRLF_LEN};
+use super::{extract_len_and_end, extract_nth, CRLF_LEN};
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct RespMap(pub(crate) BTreeMap<String, RespFrame>);
@@ -32,7 +32,7 @@ impl RespDecoder for RespMap {
             return Err(RespError::Incomplete);
         }
 
-        let nth = extract_length(buf, Self::PREFIX)?;
+        let nth = extract_nth(buf, Self::PREFIX)?;
         let mut map = Self::new();
         for _ in 0..nth {
             let key = SimpleString::decode(buf)?;
@@ -43,9 +43,9 @@ impl RespDecoder for RespMap {
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let (nth, position) = extract_nth_and_position(buf)?;
-        let mut total = position + CRLF_LEN;
-        for _ in 0..nth {
+        let (len, end) = extract_len_and_end(buf)?;
+        let mut total = end + CRLF_LEN;
+        for _ in 0..len {
             let key_len = RespFrame::expect_length(&buf[total..])?;
             let value_len = RespFrame::expect_length(&buf[total + key_len..])?;
             total += key_len + value_len;

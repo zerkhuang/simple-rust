@@ -1,45 +1,54 @@
 use std::ops::Deref;
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 
 use crate::{RespDecoder, RespEncoder, RespError};
 
-use super::{extract_fixed_data, extract_sized_data};
+use super::{extract_data, extract_length_data, find_crlf, CRLF, CRLF_LEN};
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
 pub struct BulkString(pub(crate) Vec<u8>);
 
 // - bulk string: "$<length>\r\n<data>\r\n"
+// - null bulk string: "$-1\r\n"
 impl RespEncoder for BulkString {
     fn encode(&self) -> Vec<u8> {
+        if self.is_empty() {
+            return "$-1\r\n".to_string().into_bytes();
+        }
         format!("${}\r\n{}\r\n", self.len(), String::from_utf8_lossy(self)).into_bytes()
     }
 }
 
 impl RespDecoder for BulkString {
     const PREFIX: &'static str = "$";
-    const N_CRLF: usize = 2;
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        let data = extract_sized_data(buf, Self::PREFIX)?;
+        let len_data = extract_length_data(buf, Self::PREFIX)?;
+        if len_data == "-1" {
+            buf.advance(3 + CRLF_LEN);
+            return Ok(BulkString::new(""));
+        }
+        let len = len_data
+            .parse::<usize>()
+            .map_err(|_| RespError::InvalidFrameLength)?;
+        let data = extract_data(
+            buf,
+            format!("{}{}{}", Self::PREFIX, len_data, CRLF).as_str(),
+        )?;
+        if data.len() != len {
+            return Err(RespError::InvalidFrameLength);
+        }
         Ok(BulkString::new(data))
     }
-}
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
-pub struct NullBulkString;
-
-// - null bulk string: "$-1\r\n"
-impl RespEncoder for NullBulkString {
-    fn encode(&self) -> Vec<u8> {
-        "$-1\r\n".to_string().into_bytes()
-    }
-}
-
-impl RespDecoder for NullBulkString {
-    const PREFIX: &'static str = "$";
-    fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        extract_fixed_data(buf, Self::PREFIX, "-1", "NullBulkString")?;
-        Ok(Self)
+    fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
+        let len_end = find_crlf(buf, 1, 1).ok_or(RespError::Incomplete)?;
+        let data_start = len_end + CRLF_LEN;
+        if &buf[1..len_end] == b"-1" {
+            return Ok(data_start);
+        }
+        let end = find_crlf(&buf[data_start..], 1, 0).ok_or(RespError::Incomplete)?;
+        Ok(data_start + end + CRLF_LEN)
     }
 }
 
@@ -88,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_null_bulk_string_encode() {
-        let frame = NullBulkString;
+        let frame = BulkString::new("");
         assert_eq!(frame.encode(), b"$-1\r\n");
     }
 
@@ -108,17 +117,12 @@ mod tests {
     #[test]
     fn test_null_bulk_string_decode() -> Result<()> {
         let mut buf = BytesMut::from("$-1\r\n");
-        let frame = NullBulkString::decode(&mut buf)?;
-        assert_eq!(frame, NullBulkString);
+        let frame = BulkString::decode(&mut buf)?;
+        assert_eq!(frame, BulkString::new(""));
 
         let mut buf = BytesMut::from("$-2\r\n");
-        let frame = NullBulkString::decode(&mut buf);
-        assert_eq!(
-            frame,
-            Err(RespError::Invalid(
-                "NullBulkString expected: -1, got: -2".to_string()
-            ))
-        );
+        let frame = BulkString::decode(&mut buf);
+        assert_eq!(frame, Err(RespError::InvalidFrameLength));
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[enum_dispatch(RespEncoder)]
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 pub enum RespFrame {
     SimpleString(SimpleString),
     Error(SimpleError),

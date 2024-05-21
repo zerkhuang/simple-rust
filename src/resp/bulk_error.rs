@@ -6,7 +6,7 @@ use crate::{RespDecoder, RespEncoder, RespError};
 
 use super::{extract_data, extract_len_and_end, CRLF_LEN};
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 pub struct BulkError(pub(crate) Vec<u8>);
 
 // - bulk error: "!<length>\r\n<error>\r\n"

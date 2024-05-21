@@ -9,7 +9,7 @@ use crate::{RespDecoder, RespEncoder, RespError, RespFrame};
 
 use super::{extract_len_and_end, extract_nth, CRLF_LEN};
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 pub struct RespSet(pub(crate) BTreeSet<RespFrame>);
 
 // - set: "~<number-of-elements>\r\n<element-1>...<element-n>"

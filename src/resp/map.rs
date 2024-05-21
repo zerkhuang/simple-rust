@@ -9,7 +9,7 @@ use crate::{RespDecoder, RespEncoder, RespError, RespFrame, SimpleString};
 
 use super::{extract_len_and_end, extract_nth, CRLF_LEN};
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 pub struct RespMap(pub(crate) BTreeMap<String, RespFrame>);
 
 // - map: "%<number-of-entries>\r\n<key-1><value-1>...<key-n><value-n>"

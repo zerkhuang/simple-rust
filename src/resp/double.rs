@@ -6,7 +6,7 @@ use crate::{RespDecoder, RespEncoder, RespError};
 
 use super::extract_data;
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Hash)]
 pub struct RespDouble(pub(crate) String);
 
 // - double: ",[<+|->]<integral>[.<fractional>][<E|e>[sign]<exponent>]\r\n"

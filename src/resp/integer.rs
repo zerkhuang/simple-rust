@@ -7,8 +7,8 @@ use super::extract_data;
 // - integer: ":[<+|->]<value>\r\n"
 impl RespEncoder for i64 {
     fn encode(&self) -> Vec<u8> {
-        let sign = if *self < 0 { "" } else { "+" };
-        format!(":{}{}\r\n", sign, self).into_bytes()
+        // let sign = if *self < 0 { "" } else { "" }; // 实际测试中不需要 + 号
+        format!(":{}\r\n", self).into_bytes()
     }
 }
 
@@ -31,7 +31,7 @@ mod tests {
     #[test]
     fn test_integer_encode() {
         let frame = 123;
-        assert_eq!(frame.encode(), b":+123\r\n");
+        assert_eq!(frame.encode(), b":123\r\n");
 
         let frame = -123;
         assert_eq!(frame.encode(), b":-123\r\n");

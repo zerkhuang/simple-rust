@@ -1,6 +1,7 @@
 mod echo;
 mod hmap;
 mod map;
+mod set;
 
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
@@ -12,6 +13,7 @@ pub use self::{
     echo::Echo,
     hmap::{HGet, HGetAll, HMGet, HSet},
     map::{Get, Set},
+    set::{SAdd, SIsMember},
 };
 
 // lazy_static 懒加载
@@ -34,6 +36,8 @@ pub enum Command {
     HGetAll(HGetAll),
     HMGet(HMGet),
     Echo(Echo),
+    SAdd(SAdd),
+    SIsMember(SIsMember),
 }
 
 #[derive(Debug, Error)]
@@ -63,6 +67,8 @@ impl TryFrom<RespArray> for Command {
                 b"hgetall" => Ok(HGetAll::try_from(array)?.into()),
                 b"hmget" => Ok(HMGet::try_from(array)?.into()),
                 b"echo" => Ok(Echo::try_from(array)?.into()),
+                b"sadd" => Ok(SAdd::try_from(array)?.into()),
+                b"sismember" => Ok(SIsMember::try_from(array)?.into()),
                 _ => Err(CommandError::InvalidCommand(format!(
                     "Invalid command: {}",
                     String::from_utf8_lossy(cmd)

@@ -89,10 +89,7 @@ mod tests {
         set.insert(RespArray::new(vec![1234.into(), true.into()]).into());
         set.insert(b"world".into());
         set.insert(b"world".into());
-        assert_eq!(
-            &set.encode(),
-            b"~2\r\n$5\r\nworld\r\n*2\r\n:+1234\r\n#t\r\n"
-        );
+        assert_eq!(&set.encode(), b"~2\r\n$5\r\nworld\r\n*2\r\n:1234\r\n#t\r\n");
     }
 
     #[test]
